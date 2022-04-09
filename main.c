@@ -5,10 +5,15 @@
 #include <string.h>
 #include <sys/types.h>
 #include <dirent.h>
+#include <termios.h>
 #include <sys/stat.h>
-/*
-  Function Declarations for builtin shell commands:
- */
+#include<stdio.h>
+#include<sys/types.h>
+#include<sys/socket.h>
+#include<net/if.h>
+#include<netinet/in.h>
+#include<sys/ioctl.h>
+
 int shell_cd(char **args);
 int shell_ls(char **args);
 int shell_help(char **args);
@@ -17,10 +22,8 @@ int shell_cat(char **args);
 int shell_mkdir(char **args);
 int shell_rmdir(char **args);
 int shell_rm(char **args);
-//int lsh_func(char **args);
-/*
-  List of builtin commands, followed by their corresponding functions.
- */
+int shell_menu(void);
+
 char *builtin_str[] = {
     "scd",
     "shelp",
@@ -29,7 +32,8 @@ char *builtin_str[] = {
     "scat",
     "srmdir",
     "srm",
-    "smkdir"
+    "smkdir",
+    "smenu"
 };
 
 char *builtin_keys[] = {
@@ -37,6 +41,7 @@ char *builtin_keys[] = {
     "-b",
 };
 
+char history[64][64]; 
 
 int (*builtin_func[]) (char **) = {
     &shell_cd,
@@ -46,7 +51,8 @@ int (*builtin_func[]) (char **) = {
     &shell_cat,
     &shell_rmdir,
     &shell_rm,
-    &shell_mkdir
+    &shell_mkdir,
+    &shell_menu,
 };
 
 int lsh_num_builtins() {
@@ -55,6 +61,87 @@ int lsh_num_builtins() {
 
 int lsh_num_builtins_keys() {
     return sizeof (builtin_keys) / sizeof (char *);
+}
+char *menu[] = {
+ "i - ip",
+ "q - quit",
+ NULL,
+
+};
+
+
+int getchoice(char *greet, char *choices[]) {
+
+    int chosen = 0;
+    int selected;
+    char **option;
+    do {
+        fprintf(stdout, "Choice: %s\n", greet);
+        option = choices;
+        while (*option) {
+            printf("%s\n", *option);
+            option++;
+        }
+        do {
+            selected = fgetc(stdin);
+        } while (selected == '\n' || selected == '\r');
+        option = choices;
+        while (*option) {
+            if (selected == *option[0]) {
+                chosen = 1;
+                break;
+            }
+            option++;
+        }
+        if (!chosen) {
+            printf("Incorrect choice, select again\n");
+        }
+    } while (!chosen);
+
+    return selected;
+
+}
+int shell_ip(void){
+  int i,n,s;
+  struct ifreq ifr[100];
+  struct ifconf ifconf;
+  struct sockaddr_in *sin;
+ 
+  s=socket(AF_INET, SOCK_DGRAM, 0);
+  ifconf.ifc_len=sizeof(ifr);
+  ifconf.ifc_req=ifr;
+  ioctl(s, SIOCGIFCONF, &ifconf);
+  close(s);
+ 
+  n=ifconf.ifc_len/sizeof(struct ifreq);
+  for(i=0;i<n;i++) {
+    sin=(struct sockaddr_in *) (&ifr[i].ifr_addr);
+    printf("%s -> %s\n",ifr[i].ifr_name,inet_ntoa(sin->sin_addr));
+  }
+}
+
+int shell_menu(void) {
+    int choice = 0;
+    struct termios initial_settings, new_settings;
+
+    tcgetattr(fileno(stdin), &initial_settings);
+    new_settings = initial_settings;
+    new_settings.c_lflag &= ~ICANON;
+    new_settings.c_lflag &= ~ECHO;
+    new_settings.c_cc[VMIN] = 1;
+    new_settings.c_cc[VTIME] = 0;
+    new_settings.c_lflag &= ~ISIG;
+    if (tcsetattr(fileno(stdin), TCSANOW, &new_settings) != 0) {
+        fprintf(stderr, "could not set attributes\n");
+    }
+    do {
+        choice = getchoice("Please select an action", menu);
+        printf("You have chosen: %c\n", choice);
+        if(choice == 'i') shell_ip();
+    } while (choice != 'q');
+
+    tcsetattr(fileno(stdin), TCSANOW, &initial_settings);
+    return 1;
 }
 
 int shell_mkdir(char **args) {
@@ -155,23 +242,43 @@ int shell_ls(char **args) {
         }
         switch (i) {
             case 0:
-                dptr = opendir(args[2]);
-                if (!dptr) {
-                    fprintf(stderr, "not a folder\n");
-                } else {
+                if (args[2] == NULL) {
+                    char pn;
+                    char currpath[64];
+                    pn = getwd(currpath);
+                    dptr = opendir(currpath);
                     while ((ds = readdir(dptr)) != 0)
-                        printf("%c\n", ds->d_type);
-                    closedir(dptr);
+                        printf("%c\n", (char) ds->d_type);
+                    closedir(dptr);                  
+                } else {
+                    dptr = opendir(args[2]);
+                    if (!dptr) {
+                        fprintf(stderr, "not a folder\n");
+                    } else {
+                        while ((ds = readdir(dptr)) != 0)
+                            printf("%c\n", (char) ds->d_type);
+                        closedir(dptr);
+                    }
                 }
                 break;
             case 1:
-                dptr = opendir(args[2]);
-                if (!dptr) {
-                    fprintf(stderr, "not a folder\n");
-                } else {
+                if (args[2] == NULL) {
+                    char pn;
+                    char currpath[64];
+                    pn = getwd(currpath);
+                    dptr = opendir(currpath);
                     while ((ds = readdir(dptr)) != 0)
-                        printf("%d\n", ds->d_ino);
+                        printf("%d\n", (int) ds->d_ino);
                     closedir(dptr);
+                } else {
+                    dptr = opendir(args[2]);
+                    if (!dptr) {
+                        fprintf(stderr, "not a folder\n");
+                    } else {
+                        while ((ds = readdir(dptr)) != 0)
+                            printf("%d\n", (int) ds->d_ino);
+                        closedir(dptr);
+                    }
                 }
                 break;
             default:
@@ -194,15 +301,12 @@ int shell_ls(char **args) {
 
 int shell_help(char **args) {
     int i;
-    printf("Stephen Brennan's LSH\n");
-    printf("Type program names and arguments, and hit enter.\n");
     printf("The following are built in:\n");
 
     for (i = 0; i < lsh_num_builtins(); i++) {
         printf("  %s\n", builtin_str[i]);
     }
-
-    printf("Use the man command for information on other programs.\n");
+    char buf[64];
     return 1;
 }
 
@@ -259,12 +363,8 @@ char *read_line(void) {
         fprintf(stderr, "lsh: allocation error\n");
         exit(EXIT_FAILURE);
     }
-
     while (1) {
-        // Read a character
         c = getchar();
-
-        // If we hit EOF, replace it with a null character and return.
         if (c == EOF || c == '\n') {
             buffer[position] = '\0';
             return buffer;
@@ -273,7 +373,6 @@ char *read_line(void) {
         }
         position++;
 
-        // If we have exceeded the buffer, reallocate.
         if (position >= bufsize) {
             bufsize += LSH_RL_BUFSIZE;
             buffer = realloc(buffer, bufsize);
@@ -282,6 +381,7 @@ char *read_line(void) {
                 exit(EXIT_FAILURE);
             }
         }
+        char buffer[10];
     }
 }
 
@@ -322,6 +422,8 @@ void shell_loop(void) {
     char *line;
     char **args;
     int status;
+    int i=0;
+    int state = 1;
 
     do {
         printf("myshell>> ");
