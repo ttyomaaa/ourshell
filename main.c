@@ -7,13 +7,22 @@
 #include <dirent.h>
 #include <termios.h>
 #include <sys/stat.h>
-#include<stdio.h>
-#include<sys/types.h>
-#include<sys/socket.h>
-#include<net/if.h>
-#include<netinet/in.h>
-#include<sys/ioctl.h>
-
+#include <stdio.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <sys/ioctl.h>
+#include <signal.h>
+#include <pwd.h>
+#include <wait.h>
+#include <errno.h>
+#include <time.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#define PRIMARY_COLOR   "\033[92m"
+#define SECONDARY_COLOR "\x1B[31m"
+#define RESET_COLOR     "\033[0m"
 int shell_cd(char **args);
 int shell_ls(char **args);
 int shell_help(char **args);
@@ -23,6 +32,40 @@ int shell_mkdir(char **args);
 int shell_rmdir(char **args);
 int shell_rm(char **args);
 int shell_menu(void);
+int shell_bg(void); 
+
+struct bg_task_t {
+    pid_t  pid;           // Process id
+    bool   finished;      // Process state
+    char*  timestamp;     // Process state
+    char*  cmd;           // Command cmd
+};
+typedef struct bg_task_t bg_task;
+
+struct fg_task_t {
+    pid_t pid;     // Process id
+    bool finished; // Process state
+};
+typedef struct fg_task_t fg_task;
+
+// Struct of all tasks
+struct tasks_t {
+    fg_task  foreground; // Process id of foreground bg_task
+    bg_task* background; // Background tasks
+    size_t   cursor;     // Cursor of background tasks
+    size_t   capacity;   // Background array capacity
+};
+typedef struct tasks_t tasks;
+
+tasks t = {
+    .foreground = {
+        .pid = -1,
+        .finished = true
+    },
+    .background = NULL,
+    .cursor = 0,
+    .capacity = 0
+};
 
 char *builtin_str[] = {
     "scd",
@@ -33,7 +76,8 @@ char *builtin_str[] = {
     "srmdir",
     "srm",
     "smkdir",
-    "smenu"
+    "smenu",
+    "sbg"
 };
 
 char *builtin_keys[] = {
@@ -53,6 +97,7 @@ int (*builtin_func[]) (char **) = {
     &shell_rm,
     &shell_mkdir,
     &shell_menu,
+    &shell_bg
 };
 
 int lsh_num_builtins() {
@@ -69,6 +114,27 @@ char *menu[] = {
 
 };
 
+int shell_bg(void) {
+    // Temp background task variable
+    bg_task* bt;
+
+    for (size_t i = 0; i < t.cursor; i++) {
+        // Store background task in temp variable
+        bt = &t.background[i];
+
+        // Print info about task
+        printf(
+            "[%zu]%s cmd: %s%s;%s pid: %s%d; %s"
+            "state: %s%s;%s timestamp: %s%s", i,
+            SECONDARY_COLOR, RESET_COLOR, bt->cmd,
+            SECONDARY_COLOR, RESET_COLOR, bt->pid,
+            SECONDARY_COLOR, RESET_COLOR, bt->finished ? "finished" : "active",
+            SECONDARY_COLOR, RESET_COLOR, bt->timestamp
+        );
+    }
+
+    return 1;
+}
 
 int getchoice(char *greet, char *choices[]) {
 
@@ -118,6 +184,7 @@ int shell_ip(void){
     sin=(struct sockaddr_in *) (&ifr[i].ifr_addr);
     printf("%s -> %s\n",ifr[i].ifr_name,inet_ntoa(sin->sin_addr));
   }
+  return 1;
 }
 
 int shell_menu(void) {
@@ -301,7 +368,7 @@ int shell_ls(char **args) {
 
 int shell_help(char **args) {
     int i;
-    printf("The following are built in:\n");
+    printf("%sThe following are built in:%s\n",SECONDARY_COLOR,RESET_COLOR);
 
     for (i = 0; i < lsh_num_builtins(); i++) {
         printf("  %s\n", builtin_str[i]);
